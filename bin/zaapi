@@ -1,0 +1,87 @@
+#!/usr/bin/python
+
+import logging, os, errno, argparse, re
+from tornado.httpserver import HTTPServer
+from tornado.ioloop import IOLoop
+from tornado.web import Application
+from zaapi.zaapi_util import mkDir, forkIt
+import zaapi.handlers as zh
+import ConfigParser
+
+config = ConfigParser.ConfigParser()
+config.read('/etc/zaapi/zaapi.conf')
+port = config.get('defaults', 'port')
+public_port = config.get('defaults', 'public_port')
+certfile = config.get('defaults', 'certfile')
+keyfile = config.get('defaults', 'keyfile')
+logfile = config.get('defaults', 'logfile')
+
+logfile_dir = os.path.dirname(logfile)
+mkDir(logfile_dir)
+filehandler = logging.FileHandler(
+    filename = logfile, 
+    mode = 'a', 
+    encoding = None, 
+    delay = False
+)
+filehandler.setLevel(logging.INFO)
+if logging.root.level > filehandler.level:
+    logging.root.setLevel = filehandler.level
+logging.root.addHandler(filehandler)
+
+parser = argparse.ArgumentParser(description='Zenoss as a service API daemon')
+parser.add_argument('-d', '--daemon', help='run in the background',
+                   action='store_true')
+parser.add_argument('-f', '--foreground', help='run in the foreground',
+                   action='store_true')
+parser.add_argument('-P', '--pidfile', help='pid file for use with service script',
+                   nargs='?')
+args = vars(parser.parse_args())
+pidfile = args['pidfile']
+
+app = Application([
+    (r"/help", zh.Help),
+    (r"/all/test", zh.AllTest),
+    (r"/aws/s3/mount/test", zh.AwsS3MountTest),
+    (r"/zenoss/copyright/([\w\d\-]+)", zh.ZenossCopyright),
+    (r"/zenoss/copyright/test/([\w\d\-]+)", zh.ZenossCopyrightTest),
+    (r"/zenoss/collector/add/([\w\d\-]+)", zh.ZenossCollectorAdd),
+    (r"/zenoss/collector/add/status/([\w\d\-]+)", zh.ZenossCollectorAddStatus),
+    (r"/zenoss/collector/init/([\w\d\-_]+)", zh.ZenossCollectorInit),
+    (r"/zenoss/collector/key/files/([\w\d\-_]+)", zh.ZenossCollectorKeyFiles),
+    (r"/zenoss/collector/key/test/([\w\d\-_]+)", zh.ZenossCollectorKeyTest),
+    (r"/zenoss/collector/pod/add/([\w\d\-\.]+)", zh.ZenossCollectorPodAdd),
+    (r"/zenoss/status", zh.ZenossStatus),
+    (r"/zenoss/status/test", zh.ZenossStatusTest),
+    (r"/openvpn/status", zh.OpenvpnStatus),
+    (r"/openvpn/status/test", zh.OpenvpnStatusTest),
+    (r"/memcached/status", zh.MemcachedStatus),
+    (r"/memcached/status/test", zh.MemcachedStatusTest),
+    (r"/rabbitmq/status", zh.RabbitmqStatus),
+    (r"/rabbitmq/status/test", zh.RabbitmqStatusTest),
+])
+
+public_app = Application([
+    (r"/help", zh.PubHelp),
+    (r"/zenoss/collector/init/([\w\d\-_]+)", zh.ZenossCollectorInit),
+])
+
+def run_service():
+    http_server = HTTPServer(app, ssl_options={
+        "certfile": certfile,
+        "keyfile": keyfile,})
+    http_server.listen(port)
+    pub_http_server = HTTPServer(public_app, ssl_options={
+        "certfile": certfile,
+        "keyfile": keyfile,})
+    pub_http_server.listen(public_port)
+    IOLoop.instance().start()
+
+if __name__ == "__main__":
+    if args['foreground']:
+        run_service()
+    elif args['daemon']:
+        forkIt(run_service, pidfile)
+    else:
+        parser.print_help()
+

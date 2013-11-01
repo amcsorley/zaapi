@@ -1,0 +1,4 @@
+include *.txt *.rst
+recursive-include zaapi/init-script *
+recursive-include zaapi/config *
+recursive-include zaapi/certs *
